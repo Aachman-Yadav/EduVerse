@@ -1,0 +1,215 @@
+"use client";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ChatStream — Renders the scrollable message list.
+//
+// Responsibilities:
+// - Render all ChatMessage objects via MessageBubble
+// - Auto-scroll to bottom on new messages / streaming tokens
+// - Show empty state when no messages exist
+// - Show status indicator during connecting/streaming
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { useEffect, useRef, memo } from "react";
+import type { ChatMessage, AgentThought } from "@/lib/types";
+import type { StreamStatus } from "@/hooks/useChatStream";
+import { MessageBubble } from "./MessageBubble";
+
+// ─── Props ───────────────────────────────────────────────────────────────────
+
+interface ChatStreamProps {
+  messages: ChatMessage[];
+  status: StreamStatus;
+  statusMessage: string | null;
+  streamingText: string;
+  agentThoughts?: AgentThought[];
+  activeNodes?: string[];
+  onFeedback?: (messageId: string, rating: "up" | "down") => void;
+}
+
+// ─── Status Bar ──────────────────────────────────────────────────────────────
+
+function StatusIndicator({
+  status,
+  statusMessage,
+}: {
+  status: StreamStatus;
+  statusMessage: string | null;
+}) {
+  if (status === "idle" || status === "done") return null;
+
+  const isActive = status === "connecting" || status === "streaming";
+  const isError = status === "error";
+
+  return (
+    <div
+      className="flex items-center gap-2.5 px-4 py-2 mx-auto text-[12px] rounded-full w-fit animate-[fade-in_0.2s_ease-out]"
+      style={{
+        background: isError
+          ? 'var(--color-danger-dim)'
+          : isActive
+          ? 'rgba(239,243,244,0.04)'
+          : 'var(--color-warning-dim)',
+        color: isError
+          ? 'var(--color-danger)'
+          : isActive
+          ? 'var(--color-text-muted)'
+          : 'var(--color-warning)',
+      }}
+    >
+      {isActive && (
+        <span className="w-1.5 h-1.5 rounded-full animate-[pulse-fast_0.8s_ease-in-out_infinite]" style={{ backgroundColor: 'currentColor' }} />
+      )}
+      {statusMessage ?? (
+        status === "connecting"
+          ? "Connecting…"
+          : status === "streaming"
+          ? "Thinking…"
+          : status === "hitl_paused"
+          ? "Waiting for your decision…"
+          : status === "error"
+          ? "Something went wrong"
+          : ""
+      )}
+    </div>
+  );
+}
+
+// ─── Empty State ─────────────────────────────────────────────────────────────
+
+function EmptyState() {
+  return (
+    <div className="flex flex-col items-center justify-center flex-1 gap-5 text-center px-6 animate-[fade-in_0.5s_ease-out]">
+      <div
+        className="w-20 h-20 rounded-2xl flex items-center justify-center text-[32px]"
+        style={{
+          background: 'linear-gradient(135deg, rgba(29,155,240,0.1) 0%, rgba(239,243,244,0.04) 100%)',
+          border: '1px solid var(--color-border)',
+          animation: 'float 3s ease-in-out infinite',
+        }}
+      >
+        ✦
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <h3 className="text-[18px] font-semibold text-[var(--color-text-main)]">
+          Ask anything about your course
+        </h3>
+        <p className="text-[13px] text-[var(--color-text-muted)] max-w-[340px] leading-relaxed">
+          EduVerse will search your course materials, reason through the answer, and cite its sources.
+        </p>
+      </div>
+
+      {/* Suggestion chips */}
+      <div className="flex flex-wrap justify-center gap-2 mt-2 max-w-[440px]">
+        {[
+          "Summarize the key concepts",
+          "Help me with the assignment",
+          "Explain this topic simply",
+        ].map((s) => (
+          <span
+            key={s}
+            className="text-[12px] text-[var(--color-text-muted)] px-3.5 py-2 rounded-full cursor-default"
+            style={{
+              border: '1px solid var(--color-border)',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(239,243,244,0.04)';
+              e.currentTarget.style.color = 'var(--color-text-main)';
+              e.currentTarget.style.borderColor = 'var(--color-border-focus)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'var(--color-text-muted)';
+              e.currentTarget.style.borderColor = 'var(--color-border)';
+            }}
+          >
+            {s}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Component ───────────────────────────────────────────────────────────────
+
+export const ChatStream = memo(function ChatStream({
+  messages,
+  status,
+  statusMessage,
+  streamingText,
+  agentThoughts,
+  activeNodes,
+  onFeedback,
+}: ChatStreamProps) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll when messages change or streaming text updates
+  useEffect(() => {
+    const el = bottomRef.current;
+    if (!el) return;
+
+    // Only auto-scroll if user is near the bottom (within 150px)
+    const container = containerRef.current;
+    if (container) {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 150;
+      if (isNearBottom) {
+        el.scrollIntoView({ behavior: "smooth", block: "end" });
+      }
+    }
+  }, [messages, streamingText, agentThoughts]);
+
+  // Prepare messages — inject a temporary assistant message if streaming or paused
+  const displayMessages = [...messages];
+  const isActive = status === "connecting" || status === "streaming" || status === "hitl_paused";
+  if (isActive) {
+    displayMessages.push({
+      id: "streaming-msg",
+      role: "assistant",
+      content: streamingText,
+      created_at: new Date().toISOString(),
+      is_streaming: status !== "hitl_paused",
+      agent_thoughts: agentThoughts,
+      active_nodes: activeNodes,
+    });
+  }
+
+  const isEmpty = displayMessages.length === 0 && status === "idle";
+
+  return (
+    <div
+      ref={containerRef}
+      className="flex-1 overflow-y-auto"
+      id="chat-stream-container"
+    >
+      <div className="flex flex-col max-w-[720px] mx-auto px-4 py-6 min-h-full">
+        {isEmpty ? (
+          <EmptyState />
+        ) : (
+          <div className="flex flex-col gap-6 flex-1">
+            {displayMessages.map((msg) => (
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                onFeedback={onFeedback}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Status indicator */}
+        {status !== "idle" && status !== "done" && (
+          <div className="mt-4 mb-2">
+            <StatusIndicator status={status} statusMessage={statusMessage} />
+          </div>
+        )}
+
+        {/* Scroll anchor */}
+        <div ref={bottomRef} className="h-px" />
+      </div>
+    </div>
+  );
+});
