@@ -26,7 +26,7 @@ export const metadata: Metadata = {
   description:
     "EduVerse is an intelligent AI tutor that learns from your course materials, answers questions with grounded citations, and adapts to your mastery over time.",
   keywords: ["AI tutor", "education", "Google Classroom", "learning", "EduVerse"],
-  authors: [{ name: "Aachman Yadav", url: new URL("https://github.com/Aachman-Yadav") }],
+  authors: [{ name: "Aachman Yadav", url: "https://github.com/Aachman-Yadav" }],
   robots: { index: true, follow: true },
   openGraph: {
     type: "website",
